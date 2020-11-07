@@ -1,27 +1,46 @@
 from Network import Network 
 import asyncio
+import time 
+
+class MessageHandler():
+	def __init__(self, receiveQ, messageQ):
+		self.receiveQ = receiveQ
+		self.messageQ = messageQ
+
+	async def handleMessage(self, msg):
+		return 1  
+
+	async def mainLoop(self):
+		print('Recursively processing the message...')
+		while True:
+			msg = await self.receiveQ.get()
+			# print(msg)
+			await self.handleMessage(msg)
+
+	def pack_msg(self, target, reply_str, target_type):
+		assert target_type in ['G','F'] # G for group; F for friend
+		data = {'message': reply_str, 'target': target, 'target_type':target_type}
+		return data 
 
 class Bot():
-	def __init__(self, qqnum, auth_key, ip, port):
+	def __init__(self, qqnum, auth_key, ip, port, HandlerClass):
 		self.qqnum = qqnum
 		self.auth_key = auth_key
 		self.ip = ip 
 		self.port = port 
-		self.handler = []
 		self.messageQ = asyncio.Queue()
-
-	def registerEventHandler(self, handler):
-		self.handler.append(handler)
+		self.receiveQ = asyncio.Queue()
+		self.handler = HandlerClass(self.receiveQ, self.messageQ)
 
 	async def addMessage(self, message, target, target_type):
 		assert target_type in ['G','F']
 		data = {'message': message, 'target': target, 'target_type':target_type}
 		await self.messageQ.put(data)
 
-	async def sendBufferedMessages(self):
-		size = self.messageQ.qsize()
-		# limit the number of messages sent per loop 
-		for i in range(min(5, size)):
+	async def sendBufferedMessagesLoop(self):
+		print('Listening to outward messages...')
+		while True:
+			await asyncio.sleep(0.5)
 			m = await self.messageQ.get()
 			if m['target_type'] == 'G':
 				asyncio.create_task(self.sendGroupMessage(m['target'], m['message']))
@@ -48,17 +67,20 @@ class Bot():
 		try: return ret['code']
 		except: return 'error'
 
-	async def mainLoop(self):
+	async def messageReceivingLoop(self):
 		print('Listening to coming messages...')
 		while True:
 			events = await Network.get(f'http://{self.ip}:{self.port}/fetchMessage?sessionKey={self.session}&count=10')
 			print(events, type(events))
 			messages = parse_messages(events)
 			for m in messages:
-				for h in self.handler:
-					asyncio.create_task(h(self, m))
-			await self.sendBufferedMessages()
-			await asyncio.sleep(5)
+				await self.receiveQ.put(m)
+			await asyncio.sleep(1)
+
+	async def mainLoop(self):
+		asyncio.create_task(self.messageReceivingLoop())
+		asyncio.create_task(self.sendBufferedMessagesLoop())
+		await self.handler.mainLoop()
 
 	async def releaseSession(self):
 		if self.session != '':
@@ -125,6 +147,7 @@ class FriendMessage():
 				self.type = m['type']
 		self.sender_qq = sender['id']
 		self.sender_name = sender['nickname']
+		self.time = time.time()
 
 	async def getImage(self):
 		if self.type == 'Image':
@@ -149,6 +172,7 @@ class GroupMessage():
 		self.sender_name = sender['memberName']
 		self.group_id = sender['group']['id']
 		self.group_name = sender['group']['name']
+		self.time = time.time()
 
 	async def getImage(self):
 		if self.type == 'Image':

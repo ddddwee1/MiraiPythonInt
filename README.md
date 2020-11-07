@@ -18,7 +18,7 @@ pip install -r requirements.txt
 
 Current version relies on:
 
-- mirai-core-qqandroid-1.2.3
+- mirai-core-qqandroid-1.3.0
 
 - mirai-console-pure-1.0-M4
 
